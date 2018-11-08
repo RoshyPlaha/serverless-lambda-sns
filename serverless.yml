@@ -1,0 +1,76 @@
+plugins:
+  - serverless-offline
+
+service: rosh-serverless-application
+
+custom:
+  tableName: 'ro-users-table-${self:provider.stage}'
+
+provider:
+  name: aws
+  runtime: nodejs6.10
+  stage: dev
+  region: eu-west-1
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+        - sns:Publish
+        - sqs:ReceiveMessage
+        - sqs:SendMessage
+      Resource:
+        - { "Fn::GetAtt": ["UsersDynamoDBTable", "Arn" ] }
+        - { "Ref": SnsTopicRo }
+    
+  environment:
+    USERS_TABLE: ${self:custom.tableName}
+
+functions:
+  app:
+    handler: index.handler
+    events:
+      - http: ANY /
+      - http: 'ANY {proxy+}'
+    environment:
+      SNS_TOPIC:
+        Ref: 'SnsTopicRo'
+  dispatcher:
+    handler: dispatcher.dispatch  
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - SqsRo
+              - Arn
+
+resources:
+  Resources:
+    UsersDynamoDBTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          -
+            AttributeName: userId
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:custom.tableName}
+    SnsTopicRo:
+      Type: 'AWS::SNS::Topic'
+      Properties:
+        TopicName: 'roshsns'
+        Subscription: [ { "Endpoint" : { "Fn::GetAtt" : [ "SqsRo", "Arn" ] }, "Protocol" : "sqs" } ]
+    SqsRo:
+      Type: 'AWS::SQS::Queue'
+      Properties:
+        QueueName: 'roshQueue'
